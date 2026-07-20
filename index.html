@@ -564,7 +564,7 @@ async function download() {
   for (const im of result.images) folder.file(im.name, im.blob);
   const blob = await zip.generateAsync({ type: 'blob' });
   saveBlob(blob, result.baseName + '.zip');
-  setStatus('done', 'ดาวน์โหลดแล้ว — แตก ZIP แล้ววางทั้งโฟลเดอร์ขึ้น GitHub ได้เลย',
+  setStatus('done', 'ดาวน์โหลดแล้ว',
     statusMeta.textContent);
 }
 
