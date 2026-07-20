@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF → Markdown</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --paper: #FBFBF8;
+    --ink: #21242A;
+    --ink-soft: #6B7280;
+    --line: #D8D8D2;
+    --stamp: #B5372B;       /* แดงตรายางเอกสารไทย */
+    --stamp-soft: #F6E4E1;
+    --ok: #2F7A4D;
+    --ok-soft: #E3F0E8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'IBM Plex Sans Thai', sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px 64px;
+    background-image: radial-gradient(var(--line) 0.8px, transparent 0.8px);
+    background-size: 22px 22px;
+  }
+  .sheet {
+    width: 100%;
+    max-width: 760px;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  header h1 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  header h1 .arrow { color: var(--stamp); }
+  header .sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+  }
+
+  /* ---------- แถบสถานะ ---------- */
+  #statusBar {
+    border: 1.5px solid var(--ink);
+    background: #fff;
+    border-radius: 6px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.9rem;
+    margin-bottom: 24px;
+    min-height: 44px;
+  }
+  #statusBar .dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--ink-soft);
+    flex-shrink: 0;
+  }
+  #statusBar.working .dot { background: var(--stamp); animation: blink 1s infinite; }
+  #statusBar.done .dot { background: var(--ok); }
+  #statusBar.error .dot { background: var(--stamp); }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  #statusText { flex: 1; }
+  #statusMeta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+    white-space: nowrap;
+  }
+  #progressTrack {
+    height: 3px;
+    background: var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: -18px 0 24px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #progressTrack.show { opacity: 1; }
+  #progressFill {
+    height: 100%;
+    width: 0%;
+    background: var(--stamp);
+    transition: width 0.2s;
+  }
+
+  /* ---------- แถวควบคุม: อัปโหลด → ดาวน์โหลด ---------- */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .btn {
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding: 12px 20px;
+    border-radius: 6px;
+    border: 1.5px solid var(--ink);
+    cursor: pointer;
+    background: #fff;
+    color: var(--ink);
+    transition: transform 0.08s, box-shadow 0.08s, background 0.15s;
+    box-shadow: 3px 3px 0 var(--ink);
+  }
+  .btn:hover:not(:disabled) { transform: translate(-1px,-1px); box-shadow: 4px 4px 0 var(--ink); }
+  .btn:active:not(:disabled) { transform: translate(2px,2px); box-shadow: 1px 1px 0 var(--ink); }
+  .btn:focus-visible { outline: 2px solid var(--stamp); outline-offset: 3px; }
+  .btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    box-shadow: 3px 3px 0 var(--line);
+    border-color: var(--line);
+  }
+  .btn.primary { background: var(--stamp); border-color: var(--stamp); color: #fff; box-shadow: 3px 3px 0 var(--ink); }
+  .flow-arrow {
+    font-size: 1.4rem;
+    color: var(--ink-soft);
+    user-select: none;
+  }
+  #fileLabel {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ---------- checkbox เอารูป ---------- */
+  .options {
+    display: flex;
+    justify-content: flex-end;
+    margin: 6px 0 12px;
+  }
+  .checkline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1.5px solid var(--ink);
+    background: #fff;
+    border-radius: 6px;
+    padding: 8px 14px;
+    user-select: none;
+  }
+  .checkline input {
+    appearance: none;
+    width: 16px; height: 16px;
+    border: 1.5px solid var(--ink);
+    border-radius: 50%;
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .checkline input:checked { background: var(--stamp); border-color: var(--stamp); }
+  .checkline input:checked::after {
+    content: '';
+    position: absolute; inset: 3px;
+    border-radius: 50%;
+    background: #fff;
+  }
+  .checkline input:focus-visible { outline: 2px solid var(--stamp); outline-offset: 2px; }
+
+  /* ---------- แกลเลอรีรูปที่แยกออกมา ---------- */
+  #gallery {
+    border: 1.5px solid var(--ink);
+    border-radius: 6px;
+    background: #fff;
+    min-height: 320px;
+    padding: 16px;
+    display: none;
+  }
+  #gallery.show { display: block; }
+  #gallery .empty {
+    height: 288px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--ink-soft);
+    font-size: 0.9rem;
+  }
+  #gallery h2 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .thumb {
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+  }
+  .thumb img {
+    width: 100%;
+    height: 130px;
+    object-fit: contain;
+    background:
+      linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%),
+      linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%);
+    background-size: 14px 14px;
+    background-position: 0 0, 7px 7px;
+  }
+  .thumb .cap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 8px;
+    border-top: 1px solid var(--line);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.66rem;
+    color: var(--ink-soft);
+  }
+  .thumb .cap a {
+    color: var(--stamp);
+    text-decoration: none;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .thumb .cap a:hover { text-decoration: underline; }
+
+  footer {
+    margin-top: 28px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--ink-soft);
+    text-align: center;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <h1>PDF <span class="arrow">→</span> Markdown</h1>
+    <div class="sub">v1 · client-side</div>
+  </header>
+
+  <!-- แถบสถานะการแปลง -->
+  <div id="statusBar">
+    <span class="dot"></span>
+    <span id="statusText">พร้อมทำงาน — เลือกไฟล์ PDF เพื่อเริ่มแปลง</span>
+    <span id="statusMeta"></span>
+  </div>
+  <div id="progressTrack"><div id="progressFill"></div></div>
+
+  <!-- อัปโหลด → ดาวน์โหลด -->
+  <div class="controls">
+    <input type="file" id="fileInput" accept="application/pdf" hidden>
+    <button class="btn" id="uploadBtn">อัปโหลดไฟล์ PDF</button>
+    <span class="flow-arrow">⟶</span>
+    <button class="btn primary" id="downloadBtn" disabled>ดาวน์โหลด md</button>
+    <span id="fileLabel"></span>
+  </div>
+
+  <!-- เอารูป -->
+  <div class="options">
+    <label class="checkline">
+      <input type="checkbox" id="includeImages" checked>
+      เอารูป
+    </label>
+  </div>
+
+  <!-- รูปที่แยกออกมา -->
+  <div id="gallery" class="show">
+    <div class="empty" id="galleryEmpty">
+      <span>รูปที่แยกออกมาจะแสดงตรงนี้</span>
+      <span style="font-size:0.75rem">ยังไม่มีไฟล์ที่แปลง</span>
+    </div>
+    <div id="galleryContent" style="display:none">
+      <h2 id="galleryTitle">รูปที่แยกออกมา</h2>
+      <div class="grid" id="grid"></div>
+    </div>
+  </div>
+
+  <footer>ทุกอย่างประมวลผลในเบราว์เซอร์ — ไฟล์ไม่ถูกส่งขึ้นเซิร์ฟเวอร์</footer>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const fileInput   = document.getElementById('fileInput');
+const uploadBtn   = document.getElementById('uploadBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const includeImg  = document.getElementById('includeImages');
+const statusBar   = document.getElementById('statusBar');
+const statusText  = document.getElementById('statusText');
+const statusMeta  = document.getElementById('statusMeta');
+const track       = document.getElementById('progressTrack');
+const fill        = document.getElementById('progressFill');
+const fileLabel   = document.getElementById('fileLabel');
+const gallery     = document.getElementById('gallery');
+const galleryEmpty   = document.getElementById('galleryEmpty');
+const galleryContent = document.getElementById('galleryContent');
+const galleryTitle   = document.getElementById('galleryTitle');
+const grid        = document.getElementById('grid');
+
+let result = null; // { baseName, mdPages: [..], images: [{name,page,blob,url,w,h}] }
+
+function setStatus(state, text, meta = '') {
+  statusBar.className = state;
+  statusText.textContent = text;
+  statusMeta.textContent = meta;
+}
+function setProgress(p) {
+  if (p == null) { track.classList.remove('show'); fill.style.width = '0%'; return; }
+  track.classList.add('show');
+  fill.style.width = Math.round(p * 100) + '%';
+}
+
+uploadBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) convert(fileInput.files[0]);
+});
+includeImg.addEventListener('change', renderGallery);
+downloadBtn.addEventListener('click', download);
+
+async function convert(file) {
+  // ล้างของเก่า
+  if (result) result.images.forEach(im => URL.revokeObjectURL(im.url));
+  result = null;
+  downloadBtn.disabled = true;
+  grid.innerHTML = '';
+  galleryContent.style.display = 'none';
+  galleryEmpty.style.display = 'flex';
+  fileLabel.textContent = file.name + ' · ' + (file.size / 1024 / 1024).toFixed(2) + ' MB';
+
+  try {
+    setStatus('working', 'กำลังอ่านไฟล์…');
+    setProgress(0);
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+
+    const mdPages = [];
+    const images = [];
+    let totalChars = 0;
+
+    for (let p = 1; p <= pdf.numPages; p++) {
+      setStatus('working', `กำลังแปลงหน้า ${p} / ${pdf.numPages}…`);
+      setProgress(p / pdf.numPages);
+      const page = await pdf.getPage(p);
+
+      // ---- ข้อความ ----
+      const tc = await page.getTextContent();
+      let text = '';
+      for (const item of tc.items) {
+        text += item.str;
+        if (item.hasEOL) text += '\n';
+      }
+      text = text.replace(/[ \t]+\n/g, '\n').trim();
+      totalChars += text.length;
+
+      // ---- รูปที่ฝังในหน้า ----
+      const pageImages = await extractImages(page, p);
+      images.push(...pageImages);
+
+      let pageMd = `## หน้า ${p}\n\n` + (text || '_(ไม่มีข้อความในหน้านี้ — อาจเป็นหน้าสแกนหรือรูปล้วน)_');
+      if (pageImages.length) {
+        pageMd += '\n\n' + pageImages.map(im => `![${im.name}](images/${im.name})`).join('\n\n');
+      }
+      mdPages.push(pageMd);
+      page.cleanup();
+    }
+
+    result = {
+      baseName: file.name.replace(/\.pdf$/i, ''),
+      mdPages,
+      images
+    };
+
+    setProgress(null);
+    setStatus('done',
+      'แปลงเสร็จแล้ว — กดดาวน์โหลดได้เลย',
+      `${pdf.numPages} หน้า · ${totalChars.toLocaleString()} ตัวอักษร · ${images.length} รูป`);
+    if (totalChars === 0 && images.length > 0) {
+      setStatus('done',
+        'แปลงเสร็จ แต่ไม่พบข้อความเลย — ไฟล์นี้น่าจะเป็น PDF สแกน (ต้องใช้ OCR)',
+        `${pdf.numPages} หน้า · ${images.length} รูป`);
+    }
+    downloadBtn.disabled = false;
+    renderGallery();
+  } catch (err) {
+    console.error(err);
+    setProgress(null);
+    setStatus('error', 'แปลงไม่สำเร็จ: ' + (err.message || 'ไฟล์อาจเสียหายหรือถูกเข้ารหัส'));
+  }
+}
+
+// ดึงรูปที่ฝังอยู่ในหน้า ผ่าน operator list ของ pdf.js
+async function extractImages(page, pageNum) {
+  const out = [];
+  let ops;
+  try { ops = await page.getOperatorList(); } catch { return out; }
+
+  const seen = new Set();
+  let idx = 0;
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    if (ops.fnArray[i] !== pdfjsLib.OPS.paintImageXObject &&
+        ops.fnArray[i] !== pdfjsLib.OPS.paintInlineImageXObject) continue;
+    const objName = ops.argsArray[i][0];
+    if (typeof objName !== 'string' || seen.has(objName)) continue;
+    seen.add(objName);
+
+    let imgObj = null;
+    try {
+      const store = objName.startsWith('g_') ? page.commonObjs : page.objs;
+      if (store.has(objName)) imgObj = store.get(objName);
+    } catch { continue; }
+    if (!imgObj) continue;
+
+    try {
+      const blobData = await imageObjToPng(imgObj);
+      if (!blobData) continue;
+      idx++;
+      const name = `page${pageNum}_img${idx}.png`;
+      out.push({
+        name,
+        page: pageNum,
+        blob: blobData.blob,
+        url: URL.createObjectURL(blobData.blob),
+        w: blobData.w,
+        h: blobData.h
+      });
+    } catch { /* ข้ามรูปที่แปลงไม่ได้ */ }
+  }
+  return out;
+}
+
+// แปลงอ็อบเจ็กต์รูปของ pdf.js (ImageBitmap หรือ raw data) เป็น PNG blob
+async function imageObjToPng(imgObj) {
+  const canvas = document.createElement('canvas');
+
+  // pdf.js เวอร์ชันใหม่บางกรณีคืน ImageBitmap
+  const bmp = imgObj.bitmap || (typeof ImageBitmap !== 'undefined' && imgObj instanceof ImageBitmap ? imgObj : null);
+  if (bmp) {
+    canvas.width = bmp.width; canvas.height = bmp.height;
+    canvas.getContext('2d').drawImage(bmp, 0, 0);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    return blob ? { blob, w: bmp.width, h: bmp.height } : null;
+  }
+
+  if (!imgObj.data || !imgObj.width || !imgObj.height) return null;
+  const { width: w, height: h, data, kind } = imgObj;
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const out = ctx.createImageData(w, h);
+  const d = out.data;
+
+  if (kind === 3 || data.length === w * h * 4) {          // RGBA
+    d.set(data.subarray(0, w * h * 4));
+  } else if (kind === 2 || data.length === w * h * 3) {   // RGB
+    for (let i = 0, j = 0; i < w * h * 3; i += 3, j += 4) {
+      d[j] = data[i]; d[j+1] = data[i+1]; d[j+2] = data[i+2]; d[j+3] = 255;
+    }
+  } else if (kind === 1) {                                 // ขาวดำ 1 บิต
+    let j = 0;
+    const rowBytes = Math.ceil(w / 8);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const byte = data[y * rowBytes + (x >> 3)];
+        const bit = (byte >> (7 - (x & 7))) & 1;
+        const v = bit ? 255 : 0;
+        d[j] = v; d[j+1] = v; d[j+2] = v; d[j+3] = 255; j += 4;
+      }
+    }
+  } else if (data.length === w * h) {                      // grayscale 8 บิต
+    for (let i = 0, j = 0; i < w * h; i++, j += 4) {
+      d[j] = d[j+1] = d[j+2] = data[i]; d[j+3] = 255;
+    }
+  } else return null;
+
+  ctx.putImageData(out, 0, 0);
+  const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+  return blob ? { blob, w, h } : null;
+}
+
+function renderGallery() {
+  if (!result) return;
+  const show = includeImg.checked && result.images.length > 0;
+  if (!show) {
+    galleryContent.style.display = 'none';
+    galleryEmpty.style.display = 'flex';
+    galleryEmpty.querySelector('span').textContent = includeImg.checked
+      ? 'ไม่พบรูปที่ฝังอยู่ในไฟล์นี้'
+      : 'ปิดโหมดเอารูปอยู่ — ติ๊ก "เอารูป" เพื่อแสดง';
+    return;
+  }
+  galleryEmpty.style.display = 'none';
+  galleryContent.style.display = 'block';
+  galleryTitle.textContent = `รูปที่แยกออกมา (${result.images.length})`;
+  grid.innerHTML = '';
+  for (const im of result.images) {
+    const el = document.createElement('div');
+    el.className = 'thumb';
+    el.innerHTML = `
+      <img src="${im.url}" alt="${im.name}" loading="lazy">
+      <div class="cap">
+        <span title="${im.name}">${im.name}<br>${im.w}×${im.h}</span>
+        <a href="${im.url}" download="${im.name}">โหลด</a>
+      </div>`;
+    grid.appendChild(el);
+  }
+}
+
+function buildMarkdown(withImages) {
+  let pages = result.mdPages;
+  if (!withImages) {
+    pages = pages.map(p => p.replace(/\n*!\[[^\]]*\]\([^)]*\)/g, '').trimEnd());
+  }
+  return `# ${result.baseName}\n\n` + pages.join('\n\n---\n\n') + '\n';
+}
+
+async function download() {
+  if (!result) return;
+  const withImages = includeImg.checked && result.images.length > 0;
+  const md = buildMarkdown(withImages);
+
+  if (!withImages) {
+    saveBlob(new Blob([md], { type: 'text/markdown' }), result.baseName + '.md');
+    return;
+  }
+  // เอารูป → แพ็กเป็น ZIP: ไฟล์ .md + โฟลเดอร์ images/ (path ตรงกับลิงก์ใน md)
+  setStatus('working', 'กำลังแพ็กไฟล์ ZIP…');
+  const zip = new JSZip();
+  zip.file(result.baseName + '.md', md);
+  const folder = zip.folder('images');
+  for (const im of result.images) folder.file(im.name, im.blob);
+  const blob = await zip.generateAsync({ type: 'blob' });
+  saveBlob(blob, result.baseName + '.zip');
+  setStatus('done', 'ดาวน์โหลดแล้ว — แตก ZIP แล้ววางทั้งโฟลเดอร์ขึ้น GitHub ได้เลย',
+    statusMeta.textContent);
+}
+
+function saveBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+</script>
+</body>
+</html>
