@@ -286,6 +286,7 @@
     <button class="btn" id="uploadBtn">อัปโหลดไฟล์ PDF</button>
     <span class="flow-arrow">⟶</span>
     <button class="btn primary" id="downloadBtn" disabled>ดาวน์โหลด md</button>
+    <button class="btn" id="zipBtn" disabled>ดาวน์โหลด ZIP</button>
     <span id="fileLabel"></span>
   </div>
 
@@ -319,6 +320,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 const fileInput   = document.getElementById('fileInput');
 const uploadBtn   = document.getElementById('uploadBtn');
 const downloadBtn = document.getElementById('downloadBtn');
+const zipBtn      = document.getElementById('zipBtn');
 const includeImg  = document.getElementById('includeImages');
 const statusBar   = document.getElementById('statusBar');
 const statusText  = document.getElementById('statusText');
@@ -350,13 +352,15 @@ fileInput.addEventListener('change', () => {
   if (fileInput.files.length) convert(fileInput.files[0]);
 });
 includeImg.addEventListener('change', renderGallery);
-downloadBtn.addEventListener('click', download);
+downloadBtn.addEventListener('click', downloadMd);
+zipBtn.addEventListener('click', downloadZip);
 
 async function convert(file) {
   // ล้างของเก่า
   if (result) result.images.forEach(im => URL.revokeObjectURL(im.url));
   result = null;
   downloadBtn.disabled = true;
+  zipBtn.disabled = true;
   grid.innerHTML = '';
   galleryContent.style.display = 'none';
   galleryEmpty.style.display = 'flex';
@@ -415,6 +419,7 @@ async function convert(file) {
         `${pdf.numPages} หน้า · ${images.length} รูป`);
     }
     downloadBtn.disabled = false;
+    zipBtn.disabled = false;
     renderGallery();
   } catch (err) {
     console.error(err);
@@ -547,24 +552,32 @@ function buildMarkdown(withImages) {
   return `# ${result.baseName}\n\n` + pages.join('\n\n---\n\n') + '\n';
 }
 
-async function download() {
+// ปุ่ม "ดาวน์โหลด md" → ได้ไฟล์ .md เปล่า ๆ อย่างเดียว (ไม่มีลิงก์รูป)
+function downloadMd() {
   if (!result) return;
-  const withImages = includeImg.checked && result.images.length > 0;
-  const md = buildMarkdown(withImages);
+  const md = buildMarkdown(false);
+  saveBlob(new Blob([md], { type: 'text/markdown' }), result.baseName + '.md');
+}
 
-  if (!withImages) {
-    saveBlob(new Blob([md], { type: 'text/markdown' }), result.baseName + '.md');
-    return;
-  }
-  // เอารูป → แพ็กเป็น ZIP: ไฟล์ .md + โฟลเดอร์ images/ (path ตรงกับลิงก์ใน md)
+// ปุ่ม "ดาวน์โหลด ZIP" → ได้ครบชุดเสมอ: .md + โฟลเดอร์ images/ (ถ้าไฟล์มีรูป)
+async function downloadZip() {
+  if (!result) return;
+  const hasImages = result.images.length > 0;
+  const md = buildMarkdown(hasImages);
+
   setStatus('working', 'กำลังแพ็กไฟล์ ZIP…');
   const zip = new JSZip();
   zip.file(result.baseName + '.md', md);
-  const folder = zip.folder('images');
-  for (const im of result.images) folder.file(im.name, im.blob);
+  if (hasImages) {
+    const folder = zip.folder('images');
+    for (const im of result.images) folder.file(im.name, im.blob);
+  }
   const blob = await zip.generateAsync({ type: 'blob' });
   saveBlob(blob, result.baseName + '.zip');
-  setStatus('done', 'ดาวน์โหลดแล้ว',
+  setStatus('done',
+    hasImages
+      ? 'ดาวน์โหลด ZIP แล้ว'
+      : 'ดาวน์โหลด md  แล้ว',
     statusMeta.textContent);
 }
 
