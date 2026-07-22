@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <style>
   :root {
     --paper: #FBFBF8;
@@ -53,8 +54,44 @@
     color: var(--ink-soft);
   }
 
+  /* ---------- แท็บ ---------- */
+  .tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1.5px solid var(--ink);
+  }
+  .tab {
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 10px 18px;
+    border: 1.5px solid var(--ink);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    background: var(--paper);
+    color: var(--ink-soft);
+    cursor: pointer;
+    position: relative;
+    top: 1.5px;
+  }
+  .tab.active {
+    background: #fff;
+    color: var(--ink);
+  }
+  .tab .tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: 500;
+    color: var(--stamp);
+    display: block;
+    margin-top: 2px;
+  }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
   /* ---------- แถบสถานะ ---------- */
-  #statusBar {
+  #statusBar, .statusBar {
     border: 1.5px solid var(--ink);
     background: #fff;
     border-radius: 6px;
@@ -66,24 +103,24 @@
     margin-bottom: 24px;
     min-height: 44px;
   }
-  #statusBar .dot {
+  .statusBar .dot {
     width: 9px; height: 9px;
     border-radius: 50%;
     background: var(--ink-soft);
     flex-shrink: 0;
   }
-  #statusBar.working .dot { background: var(--stamp); animation: blink 1s infinite; }
-  #statusBar.done .dot { background: var(--ok); }
-  #statusBar.error .dot { background: var(--stamp); }
+  .statusBar.working .dot { background: var(--stamp); animation: blink 1s infinite; }
+  .statusBar.done .dot { background: var(--ok); }
+  .statusBar.error .dot { background: var(--stamp); }
   @keyframes blink { 50% { opacity: 0.25; } }
-  #statusText { flex: 1; }
-  #statusMeta {
+  .statusText { flex: 1; }
+  .statusMeta {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 0.72rem;
     color: var(--ink-soft);
     white-space: nowrap;
   }
-  #progressTrack {
+  .progressTrack {
     height: 3px;
     background: var(--line);
     border-radius: 2px;
@@ -92,8 +129,8 @@
     opacity: 0;
     transition: opacity 0.2s;
   }
-  #progressTrack.show { opacity: 1; }
-  #progressFill {
+  .progressTrack.show { opacity: 1; }
+  .progressFill {
     height: 100%;
     width: 0%;
     background: var(--stamp);
@@ -136,7 +173,7 @@
     color: var(--ink-soft);
     user-select: none;
   }
-  #fileLabel {
+  .fileLabel {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 0.75rem;
     color: var(--ink-soft);
@@ -150,6 +187,9 @@
   .options {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
     margin: 6px 0 12px;
   }
   .checkline {
@@ -184,7 +224,7 @@
   .checkline input:focus-visible { outline: 2px solid var(--stamp); outline-offset: 2px; }
 
   /* ---------- แกลเลอรีรูปที่แยกออกมา ---------- */
-  #gallery {
+  .gallery {
     border: 1.5px solid var(--ink);
     border-radius: 6px;
     background: #fff;
@@ -192,8 +232,8 @@
     padding: 16px;
     display: none;
   }
-  #gallery.show { display: block; }
-  #gallery .empty {
+  .gallery.show { display: block; }
+  .gallery .empty {
     height: 288px;
     display: flex;
     flex-direction: column;
@@ -203,7 +243,7 @@
     color: var(--ink-soft);
     font-size: 0.9rem;
   }
-  #gallery h2 {
+  .gallery h2 {
     font-size: 0.8rem;
     font-weight: 600;
     color: var(--ink-soft);
@@ -269,44 +309,101 @@
 <div class="sheet">
   <header>
     <h1>PDF <span class="arrow">→</span> Markdown</h1>
-    <div class="sub">v1 · client-side</div>
+    <div class="sub">v2 · client-side</div>
   </header>
 
-  <!-- แถบสถานะการแปลง -->
-  <div id="statusBar">
-    <span class="dot"></span>
-    <span id="statusText">พร้อมทำงาน — เลือกไฟล์ PDF เพื่อเริ่มแปลง</span>
-    <span id="statusMeta"></span>
-  </div>
-  <div id="progressTrack"><div id="progressFill"></div></div>
-
-  <!-- อัปโหลด → ดาวน์โหลด -->
-  <div class="controls">
-    <input type="file" id="fileInput" accept="application/pdf" hidden>
-    <button class="btn" id="uploadBtn">อัปโหลดไฟล์ PDF</button>
-    <span class="flow-arrow">⟶</span>
-    <button class="btn primary" id="downloadBtn" disabled>ดาวน์โหลด md</button>
-    <button class="btn" id="zipBtn" disabled>ดาวน์โหลด ZIP</button>
-    <span id="fileLabel"></span>
+  <div class="tabs">
+    <button class="tab active" data-target="panel-normal">
+      PDF ธรรมดา
+    </button>
+    <button class="tab" data-target="panel-scan">
+      PDF สแกน
+      <span class="tag">ใช้ OCR</span>
+    </button>
   </div>
 
-  <!-- เอารูป -->
-  <div class="options">
-    <label class="checkline">
-      <input type="checkbox" id="includeImages" checked>
-      เอารูป
-    </label>
-  </div>
-
-  <!-- รูปที่แยกออกมา -->
-  <div id="gallery" class="show">
-    <div class="empty" id="galleryEmpty">
-      <span>รูปที่แยกออกมาจะแสดงตรงนี้</span>
-      <span style="font-size:0.75rem">ยังไม่มีไฟล์ที่แปลง</span>
+  <!-- ============ หน้า 1: PDF ธรรมดา (มี text layer อยู่แล้ว) ============ -->
+  <div class="panel active" id="panel-normal" data-force-ocr="false">
+    <!-- แถบสถานะการแปลง -->
+    <div class="statusBar">
+      <span class="dot"></span>
+      <span class="statusText">พร้อมทำงาน — เลือกไฟล์ PDF เพื่อเริ่มแปลง</span>
+      <span class="statusMeta"></span>
     </div>
-    <div id="galleryContent" style="display:none">
-      <h2 id="galleryTitle">รูปที่แยกออกมา</h2>
-      <div class="grid" id="grid"></div>
+    <div class="progressTrack"><div class="progressFill"></div></div>
+
+    <!-- อัปโหลด → ดาวน์โหลด -->
+    <div class="controls">
+      <input type="file" class="fileInput" accept="application/pdf" hidden>
+      <button class="btn uploadBtn">อัปโหลดไฟล์ PDF</button>
+      <span class="flow-arrow">⟶</span>
+      <button class="btn primary downloadBtn" disabled>ดาวน์โหลด md</button>
+      <button class="btn zipBtn" disabled>ดาวน์โหลด ZIP</button>
+      <span class="fileLabel"></span>
+    </div>
+
+    <!-- เอารูป -->
+    <div class="options">
+      <label class="checkline">
+        <input type="checkbox" class="includeImages" checked>
+        เอารูป
+      </label>
+    </div>
+
+    <!-- รูปที่แยกออกมา -->
+    <div class="gallery show">
+      <div class="empty galleryEmpty">
+        <span>รูปที่แยกออกมาจะแสดงตรงนี้</span>
+        <span style="font-size:0.75rem">ยังไม่มีไฟล์ที่แปลง</span>
+      </div>
+      <div class="galleryContent" style="display:none">
+        <h2 class="galleryTitle">รูปที่แยกออกมา</h2>
+        <div class="grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ หน้า 2: PDF สแกน (ไม่มี text layer ต้อง OCR ทุกหน้า) ============ -->
+  <div class="panel" id="panel-scan" data-force-ocr="true">
+    <!-- แถบสถานะการแปลง -->
+    <div class="statusBar">
+      <span class="dot"></span>
+      <span class="statusText">พร้อมทำงาน — เลือกไฟล์ PDF ที่สแกนมาเพื่อเริ่ม OCR</span>
+      <span class="statusMeta"></span>
+    </div>
+    <div class="progressTrack"><div class="progressFill"></div></div>
+
+    <!-- อัปโหลด → ดาวน์โหลด -->
+    <div class="controls">
+      <input type="file" class="fileInput" accept="application/pdf" hidden>
+      <button class="btn uploadBtn">อัปโหลดไฟล์ PDF สแกน</button>
+      <span class="flow-arrow">⟶</span>
+      <button class="btn primary downloadBtn" disabled>ดาวน์โหลด md</button>
+      <button class="btn zipBtn" disabled>ดาวน์โหลด ZIP</button>
+      <span class="fileLabel"></span>
+    </div>
+
+    <!-- เอารูป -->
+    <div class="options">
+      <span style="font-size:0.78rem;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;">
+        OCR ไทย+อังกฤษ ทำงานอัตโนมัติทุกหน้า
+      </span>
+      <label class="checkline">
+        <input type="checkbox" class="includeImages" checked>
+        เอารูป
+      </label>
+    </div>
+
+    <!-- รูปที่แยกออกมา -->
+    <div class="gallery show">
+      <div class="empty galleryEmpty">
+        <span>รูปที่แยกออกมาจะแสดงตรงนี้</span>
+        <span style="font-size:0.75rem">ยังไม่มีไฟล์ที่แปลง</span>
+      </div>
+      <div class="galleryContent" style="display:none">
+        <h2 class="galleryTitle">รูปที่แยกออกมา</h2>
+        <div class="grid"></div>
+      </div>
     </div>
   </div>
 
@@ -317,115 +414,247 @@
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-const fileInput   = document.getElementById('fileInput');
-const uploadBtn   = document.getElementById('uploadBtn');
-const downloadBtn = document.getElementById('downloadBtn');
-const zipBtn      = document.getElementById('zipBtn');
-const includeImg  = document.getElementById('includeImages');
-const statusBar   = document.getElementById('statusBar');
-const statusText  = document.getElementById('statusText');
-const statusMeta  = document.getElementById('statusMeta');
-const track       = document.getElementById('progressTrack');
-const fill        = document.getElementById('progressFill');
-const fileLabel   = document.getElementById('fileLabel');
-const gallery     = document.getElementById('gallery');
-const galleryEmpty   = document.getElementById('galleryEmpty');
-const galleryContent = document.getElementById('galleryContent');
-const galleryTitle   = document.getElementById('galleryTitle');
-const grid        = document.getElementById('grid');
-
-let result = null; // { baseName, mdPages: [..], images: [{name,page,blob,url,w,h}] }
-
-function setStatus(state, text, meta = '') {
-  statusBar.className = state;
-  statusText.textContent = text;
-  statusMeta.textContent = meta;
-}
-function setProgress(p) {
-  if (p == null) { track.classList.remove('show'); fill.style.width = '0%'; return; }
-  track.classList.add('show');
-  fill.style.width = Math.round(p * 100) + '%';
-}
-
-uploadBtn.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => {
-  if (fileInput.files.length) convert(fileInput.files[0]);
+// ---------- สลับแท็บ ----------
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.target).classList.add('active');
+  });
 });
-includeImg.addEventListener('change', renderGallery);
-downloadBtn.addEventListener('click', downloadMd);
-zipBtn.addEventListener('click', downloadZip);
 
-async function convert(file) {
-  // ล้างของเก่า
-  if (result) result.images.forEach(im => URL.revokeObjectURL(im.url));
-  result = null;
-  downloadBtn.disabled = true;
-  zipBtn.disabled = true;
-  grid.innerHTML = '';
-  galleryContent.style.display = 'none';
-  galleryEmpty.style.display = 'flex';
-  fileLabel.textContent = file.name + ' · ' + (file.size / 1024 / 1024).toFixed(2) + ' MB';
+// ---------- ตัวแปลง PDF→md แยกอิสระต่อพาแนล (หน้าปกติ กับ หน้าสแกน) ----------
+function initPanel(panelEl) {
+  const forceOcr = panelEl.dataset.forceOcr === 'true';
 
-  try {
-    setStatus('working', 'กำลังอ่านไฟล์…');
-    setProgress(0);
-    const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const fileInput   = panelEl.querySelector('.fileInput');
+  const uploadBtn    = panelEl.querySelector('.uploadBtn');
+  const downloadBtn  = panelEl.querySelector('.downloadBtn');
+  const zipBtn       = panelEl.querySelector('.zipBtn');
+  const includeImg   = panelEl.querySelector('.includeImages');
+  const statusBar    = panelEl.querySelector('.statusBar');
+  const statusText   = panelEl.querySelector('.statusText');
+  const statusMeta   = panelEl.querySelector('.statusMeta');
+  const track        = panelEl.querySelector('.progressTrack');
+  const fill         = panelEl.querySelector('.progressFill');
+  const fileLabel    = panelEl.querySelector('.fileLabel');
+  const galleryEmpty   = panelEl.querySelector('.galleryEmpty');
+  const galleryContent = panelEl.querySelector('.galleryContent');
+  const galleryTitle   = panelEl.querySelector('.galleryTitle');
+  const grid           = panelEl.querySelector('.grid');
 
-    const mdPages = [];
-    const images = [];
-    let totalChars = 0;
+  let result = null; // { baseName, mdPages: [..], images: [{name,page,blob,url,w,h}] }
 
-    for (let p = 1; p <= pdf.numPages; p++) {
-      setStatus('working', `กำลังแปลงหน้า ${p} / ${pdf.numPages}…`);
-      setProgress(p / pdf.numPages);
-      const page = await pdf.getPage(p);
-
-      // ---- ข้อความ ----
-      const tc = await page.getTextContent();
-      let text = '';
-      for (const item of tc.items) {
-        text += item.str;
-        if (item.hasEOL) text += '\n';
-      }
-      text = text.replace(/[ \t]+\n/g, '\n').trim();
-      totalChars += text.length;
-
-      // ---- รูปที่ฝังในหน้า ----
-      const pageImages = await extractImages(page, p);
-      images.push(...pageImages);
-
-      let pageMd = `## หน้า ${p}\n\n` + (text || '_(ไม่มีข้อความในหน้านี้ — อาจเป็นหน้าสแกนหรือรูปล้วน)_');
-      if (pageImages.length) {
-        pageMd += '\n\n' + pageImages.map(im => `![${im.name}](images/${im.name})`).join('\n\n');
-      }
-      mdPages.push(pageMd);
-      page.cleanup();
-    }
-
-    result = {
-      baseName: file.name.replace(/\.pdf$/i, ''),
-      mdPages,
-      images
-    };
-
-    setProgress(null);
-    setStatus('done',
-      'แปลงเสร็จแล้ว — กดดาวน์โหลดได้เลย',
-      `${pdf.numPages} หน้า · ${totalChars.toLocaleString()} ตัวอักษร · ${images.length} รูป`);
-    if (totalChars === 0 && images.length > 0) {
-      setStatus('done',
-        'แปลงเสร็จ แต่ไม่พบข้อความเลย — ไฟล์นี้น่าจะเป็น PDF สแกน (ต้องใช้ OCR)',
-        `${pdf.numPages} หน้า · ${images.length} รูป`);
-    }
-    downloadBtn.disabled = false;
-    zipBtn.disabled = false;
-    renderGallery();
-  } catch (err) {
-    console.error(err);
-    setProgress(null);
-    setStatus('error', 'แปลงไม่สำเร็จ: ' + (err.message || 'ไฟล์อาจเสียหายหรือถูกเข้ารหัส'));
+  function setStatus(state, text, meta = '') {
+    statusBar.className = 'statusBar ' + state;
+    statusText.textContent = text;
+    statusMeta.textContent = meta;
   }
+  function setProgress(p) {
+    if (p == null) { track.classList.remove('show'); fill.style.width = '0%'; return; }
+    track.classList.add('show');
+    fill.style.width = Math.round(p * 100) + '%';
+  }
+
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) convert(fileInput.files[0]);
+  });
+  includeImg.addEventListener('change', renderGallery);
+  downloadBtn.addEventListener('click', downloadMd);
+  zipBtn.addEventListener('click', downloadZip);
+
+  async function convert(file) {
+    if (result) result.images.forEach(im => URL.revokeObjectURL(im.url));
+    result = null;
+    downloadBtn.disabled = true;
+    zipBtn.disabled = true;
+    uploadBtn.disabled = true;
+    grid.innerHTML = '';
+    galleryContent.style.display = 'none';
+    galleryEmpty.style.display = 'flex';
+    fileLabel.textContent = file.name + ' · ' + (file.size / 1024 / 1024).toFixed(2) + ' MB';
+
+    try {
+      setStatus('working', 'กำลังอ่านไฟล์…');
+      setProgress(0);
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+
+      const mdPages = [];
+      const images = [];
+      let totalChars = 0;
+      let ocrPageCount = 0;
+
+      // ตั้ง OCR worker ตัวเดียวใช้ซ้ำทุกหน้า (เร็วกว่าสร้างใหม่ทุกรอบ)
+      // หน้า "PDF สแกน" เปิด OCR ให้เสมอ / หน้า "PDF ธรรมดา" เปิดเฉพาะหน้าที่ไม่มี text
+      let ocrWorker = null;
+      if (forceOcr) {
+        setStatus('working', 'กำลังโหลดโมดูล OCR (ไทย+อังกฤษ)…');
+        ocrWorker = await Tesseract.createWorker(['tha', 'eng'], 1, { logger: () => {} });
+      }
+
+      for (let p = 1; p <= pdf.numPages; p++) {
+        setStatus('working', `กำลังแปลงหน้า ${p} / ${pdf.numPages}…`);
+        setProgress(p / pdf.numPages);
+        const page = await pdf.getPage(p);
+
+        // ---- ข้อความจาก text layer ----
+        const tc = await page.getTextContent();
+        let text = '';
+        for (const item of tc.items) {
+          text += item.str;
+          if (item.hasEOL) text += '\n';
+        }
+        text = text.replace(/[ \t]+\n/g, '\n').trim();
+
+        // ---- ไม่มีข้อความ (หรือบังคับ OCR ทุกหน้า) → ถ่ายภาพหน้านี้แล้วอ่านด้วย OCR ----
+        let ocrUsed = false;
+        if (!text && forceOcr) {
+          if (!ocrWorker) {
+            ocrWorker = await Tesseract.createWorker(['tha', 'eng'], 1, { logger: () => {} });
+          }
+          setStatus('working', `หน้า ${p} กำลัง OCR… (${p}/${pdf.numPages})`);
+          try {
+            const canvas = await renderPageToCanvas(page, 2.0); // scale สูงหน่อยช่วยความแม่นยำ
+            const { data } = await ocrWorker.recognize(canvas);
+            text = (data.text || '').trim();
+            ocrUsed = true;
+            if (text) ocrPageCount++;
+          } catch (e) {
+            console.error('OCR error on page', p, e);
+          }
+        }
+        totalChars += text.length;
+
+        // ---- รูปที่ฝังในหน้า ----
+        const pageImages = await extractImages(page, p);
+        images.push(...pageImages);
+
+        let pageMd = `## หน้า ${p}\n\n`;
+        if (text) {
+          pageMd += text;
+          if (ocrUsed) pageMd += '\n\n_(ข้อความหน้านี้ได้จาก OCR อาจมีจุดผิดพลาด ควรตรวจทาน)_';
+        } else {
+          pageMd += '_(ไม่มีข้อความในหน้านี้ — อาจเป็นหน้าสแกนหรือรูปล้วน)_';
+        }
+        if (pageImages.length) {
+          pageMd += '\n\n' + pageImages.map(im => `![${im.name}](images/${im.name})`).join('\n\n');
+        }
+        mdPages.push(pageMd);
+        page.cleanup();
+      }
+
+      if (ocrWorker) await ocrWorker.terminate();
+
+      result = {
+        baseName: file.name.replace(/\.pdf$/i, ''),
+        mdPages,
+        images
+      };
+
+      setProgress(null);
+      let doneMsg = 'แปลงเสร็จแล้ว — กดดาวน์โหลดได้เลย';
+      let doneMeta = `${pdf.numPages} หน้า · ${totalChars.toLocaleString()} ตัวอักษร · ${images.length} รูป`;
+      if (ocrPageCount > 0) doneMeta += ` · OCR ${ocrPageCount} หน้า`;
+      if (totalChars === 0) {
+        doneMsg = forceOcr
+          ? 'แปลงเสร็จ แต่ OCR ก็ยังอ่านข้อความไม่ได้ — ลองสแกนภาพให้คมชัดขึ้น'
+          : 'แปลงเสร็จ แต่ไม่พบข้อความเลย — ไฟล์นี้น่าจะเป็น PDF สแกน ลองใช้แท็บ "PDF สแกน" แทน';
+      }
+      setStatus('done', doneMsg, doneMeta);
+      downloadBtn.disabled = false;
+      zipBtn.disabled = false;
+      uploadBtn.disabled = false;
+      renderGallery();
+    } catch (err) {
+      console.error(err);
+      setProgress(null);
+      uploadBtn.disabled = false;
+      setStatus('error', 'แปลงไม่สำเร็จ: ' + (err.message || 'ไฟล์อาจเสียหายหรือถูกเข้ารหัส'));
+    }
+  }
+
+  function renderGallery() {
+    if (!result) return;
+    const show = includeImg.checked && result.images.length > 0;
+    if (!show) {
+      galleryContent.style.display = 'none';
+      galleryEmpty.style.display = 'flex';
+      galleryEmpty.querySelector('span').textContent = includeImg.checked
+        ? 'ไม่พบรูปที่ฝังอยู่ในไฟล์นี้'
+        : 'ปิดโหมดเอารูปอยู่ — ติ๊ก "เอารูป" เพื่อแสดง';
+      return;
+    }
+    galleryEmpty.style.display = 'none';
+    galleryContent.style.display = 'block';
+    galleryTitle.textContent = `รูปที่แยกออกมา (${result.images.length})`;
+    grid.innerHTML = '';
+    for (const im of result.images) {
+      const el = document.createElement('div');
+      el.className = 'thumb';
+      el.innerHTML = `
+        <img src="${im.url}" alt="${im.name}" loading="lazy">
+        <div class="cap">
+          <span title="${im.name}">${im.name}<br>${im.w}×${im.h}</span>
+          <a href="${im.url}" download="${im.name}">โหลด</a>
+        </div>`;
+      grid.appendChild(el);
+    }
+  }
+
+  function buildMarkdown(withImages) {
+    let pages = result.mdPages;
+    if (!withImages) {
+      pages = pages.map(p => p.replace(/\n*!\[[^\]]*\]\([^)]*\)/g, '').trimEnd());
+    }
+    return `# ${result.baseName}\n\n` + pages.join('\n\n---\n\n') + '\n';
+  }
+
+  // ปุ่ม "ดาวน์โหลด md" → ได้ไฟล์ .md เปล่า ๆ อย่างเดียว (ไม่มีลิงก์รูป)
+  function downloadMd() {
+    if (!result) return;
+    const md = buildMarkdown(false);
+    saveBlob(new Blob([md], { type: 'text/markdown' }), result.baseName + '.md');
+  }
+
+  // ปุ่ม "ดาวน์โหลด ZIP" → ได้ครบชุดเสมอ: .md + โฟลเดอร์ images/ (ถ้าไฟล์มีรูป)
+  async function downloadZip() {
+    if (!result) return;
+    const hasImages = result.images.length > 0;
+    const md = buildMarkdown(hasImages);
+
+    setStatus('working', 'กำลังแพ็กไฟล์ ZIP…');
+    const zip = new JSZip();
+    zip.file(result.baseName + '.md', md);
+    if (hasImages) {
+      const folder = zip.folder('images');
+      for (const im of result.images) folder.file(im.name, im.blob);
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    saveBlob(blob, result.baseName + '.zip');
+    setStatus('done',
+      hasImages
+        ? 'ดาวน์โหลด ZIP แล้ว (md + รูปทั้งหมด) — แตกไฟล์แล้ววางทั้งโฟลเดอร์ขึ้น GitHub ได้เลย'
+        : 'ดาวน์โหลด ZIP แล้ว (ไฟล์นี้ไม่มีรูปฝังอยู่ เลยมีเฉพาะ md)',
+      statusMeta.textContent);
+  }
+}
+
+document.querySelectorAll('.panel').forEach(initPanel);
+
+// ---------- ฟังก์ชันร่วม (ไม่ผูกกับพาแนลไหนโดยเฉพาะ) ----------
+
+// เรนเดอร์หน้า PDF เป็น canvas (ใช้เป็น input ให้ OCR)
+async function renderPageToCanvas(page, scale = 2.0) {
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext('2d');
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas;
 }
 
 // ดึงรูปที่ฝังอยู่ในหน้า ผ่าน operator list ของ pdf.js
@@ -472,7 +701,6 @@ async function extractImages(page, pageNum) {
 async function imageObjToPng(imgObj) {
   const canvas = document.createElement('canvas');
 
-  // pdf.js เวอร์ชันใหม่บางกรณีคืน ImageBitmap
   const bmp = imgObj.bitmap || (typeof ImageBitmap !== 'undefined' && imgObj instanceof ImageBitmap ? imgObj : null);
   if (bmp) {
     canvas.width = bmp.width; canvas.height = bmp.height;
@@ -514,71 +742,6 @@ async function imageObjToPng(imgObj) {
   ctx.putImageData(out, 0, 0);
   const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
   return blob ? { blob, w, h } : null;
-}
-
-function renderGallery() {
-  if (!result) return;
-  const show = includeImg.checked && result.images.length > 0;
-  if (!show) {
-    galleryContent.style.display = 'none';
-    galleryEmpty.style.display = 'flex';
-    galleryEmpty.querySelector('span').textContent = includeImg.checked
-      ? 'ไม่พบรูปที่ฝังอยู่ในไฟล์นี้'
-      : 'ปิดโหมดเอารูปอยู่ — ติ๊ก "เอารูป" เพื่อแสดง';
-    return;
-  }
-  galleryEmpty.style.display = 'none';
-  galleryContent.style.display = 'block';
-  galleryTitle.textContent = `รูปที่แยกออกมา (${result.images.length})`;
-  grid.innerHTML = '';
-  for (const im of result.images) {
-    const el = document.createElement('div');
-    el.className = 'thumb';
-    el.innerHTML = `
-      <img src="${im.url}" alt="${im.name}" loading="lazy">
-      <div class="cap">
-        <span title="${im.name}">${im.name}<br>${im.w}×${im.h}</span>
-        <a href="${im.url}" download="${im.name}">โหลด</a>
-      </div>`;
-    grid.appendChild(el);
-  }
-}
-
-function buildMarkdown(withImages) {
-  let pages = result.mdPages;
-  if (!withImages) {
-    pages = pages.map(p => p.replace(/\n*!\[[^\]]*\]\([^)]*\)/g, '').trimEnd());
-  }
-  return `# ${result.baseName}\n\n` + pages.join('\n\n---\n\n') + '\n';
-}
-
-// ปุ่ม "ดาวน์โหลด md" → ได้ไฟล์ .md เปล่า ๆ อย่างเดียว (ไม่มีลิงก์รูป)
-function downloadMd() {
-  if (!result) return;
-  const md = buildMarkdown(false);
-  saveBlob(new Blob([md], { type: 'text/markdown' }), result.baseName + '.md');
-}
-
-// ปุ่ม "ดาวน์โหลด ZIP" → ได้ครบชุดเสมอ: .md + โฟลเดอร์ images/ (ถ้าไฟล์มีรูป)
-async function downloadZip() {
-  if (!result) return;
-  const hasImages = result.images.length > 0;
-  const md = buildMarkdown(hasImages);
-
-  setStatus('working', 'กำลังแพ็กไฟล์ ZIP…');
-  const zip = new JSZip();
-  zip.file(result.baseName + '.md', md);
-  if (hasImages) {
-    const folder = zip.folder('images');
-    for (const im of result.images) folder.file(im.name, im.blob);
-  }
-  const blob = await zip.generateAsync({ type: 'blob' });
-  saveBlob(blob, result.baseName + '.zip');
-  setStatus('done',
-    hasImages
-      ? 'ดาวน์โหลด ZIP แล้ว'
-      : 'ดาวน์โหลด md  แล้ว',
-    statusMeta.textContent);
 }
 
 function saveBlob(blob, name) {
