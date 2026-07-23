@@ -486,9 +486,11 @@ function initPanel(panelEl) {
       const images = [];
       let totalChars = 0;
       let ocrPageCount = 0;
+      let garbledPageCount = 0;
 
       // ตั้ง OCR worker ตัวเดียวใช้ซ้ำทุกหน้า (เร็วกว่าสร้างใหม่ทุกรอบ)
-      // หน้า "PDF สแกน" เปิด OCR ให้เสมอ / หน้า "PDF ธรรมดา" เปิดเฉพาะหน้าที่ไม่มี text
+      // หน้า "PDF สแกน" → OCR ทุกหน้าเสมอ ไม่สนใจ text layer เลย (โหลด worker ไว้ล่วงหน้า)
+      // หน้า "PDF ธรรมดา" → ใช้ text layer เป็นหลัก แล้วโหลด OCR แบบ lazy เฉพาะตอนเจอปัญหา
       let ocrWorker = null;
       if (forceOcr) {
         setStatus('working', 'กำลังโหลดโมดูล OCR (ไทย+อังกฤษ)…');
@@ -500,28 +502,43 @@ function initPanel(panelEl) {
         setProgress(p / pdf.numPages);
         const page = await pdf.getPage(p);
 
-        // ---- ข้อความจาก text layer ----
-        const tc = await page.getTextContent();
+        // ---- ข้อความจาก text layer (ข้ามขั้นตอนนี้เลยถ้าเป็นแท็บ "PDF สแกน") ----
         let text = '';
-        for (const item of tc.items) {
-          text += item.str;
-          if (item.hasEOL) text += '\n';
+        if (!forceOcr) {
+          const tc = await page.getTextContent();
+          for (const item of tc.items) {
+            text += item.str;
+            if (item.hasEOL) text += '\n';
+          }
+          text = text.replace(/[ \t]+\n/g, '\n').trim();
         }
-        text = text.replace(/[ \t]+\n/g, '\n').trim();
 
-        // ---- ไม่มีข้อความ (หรือบังคับ OCR ทุกหน้า) → ถ่ายภาพหน้านี้แล้วอ่านด้วย OCR ----
+        // ข้อความอาจ "เพี้ยน" (mojibake) ได้ทั้งที่ไม่ว่างเลย — เกิดจากฟอนต์ในไฟล์ไม่มีตาราง
+        // ToUnicode ที่ถูกต้อง ทำให้ดึงมาได้แต่รหัสภายในฟอนต์ ไม่ใช่ตัวอักษรจริง
+        const garbled = text && isGarbledText(text);
+        const needsOcr = forceOcr || !text || garbled;
+
+        // ---- เรนเดอร์หน้าเป็นภาพแล้วอ่านด้วย OCR แทน text layer ที่ใช้ไม่ได้ ----
         let ocrUsed = false;
-        if (!text && forceOcr) {
+        if (needsOcr) {
           if (!ocrWorker) {
+            setStatus('working', `หน้า ${p}: กำลังโหลดโมดูล OCR…`);
             ocrWorker = await Tesseract.createWorker(['tha', 'eng'], 1, { logger: () => {} });
           }
           setStatus('working', `หน้า ${p} กำลัง OCR… (${p}/${pdf.numPages})`);
           try {
             const canvas = await renderPageToCanvas(page, 2.0); // scale สูงหน่อยช่วยความแม่นยำ
             const { data } = await ocrWorker.recognize(canvas);
-            text = (data.text || '').trim();
-            ocrUsed = true;
-            if (text) ocrPageCount++;
+            const ocrText = (data.text || '').trim();
+            if (ocrText) {
+              if (garbled) garbledPageCount++;
+              text = ocrText;
+              ocrUsed = true;
+              ocrPageCount++;
+            } else if (garbled) {
+              // OCR อ่านไม่ออกเลย แต่เดิมมี text เพี้ยนอยู่ — เก็บของเดิมไว้ดีกว่าไม่มีอะไรเลย
+              garbledPageCount++;
+            }
           } catch (e) {
             console.error('OCR error on page', p, e);
           }
@@ -535,7 +552,11 @@ function initPanel(panelEl) {
         let pageMd = `## หน้า ${p}\n\n`;
         if (text) {
           pageMd += text;
-          if (ocrUsed) pageMd += '\n\n_(ข้อความหน้านี้ได้จาก OCR อาจมีจุดผิดพลาด ควรตรวจทาน)_';
+          if (ocrUsed && garbled) {
+            pageMd += '\n\n_(ฟอนต์ต้นฉบับของหน้านี้เพี้ยน ระบบเลยใช้ OCR อ่านแทน — อาจมีจุดผิดพลาด ควรตรวจทาน)_';
+          } else if (ocrUsed) {
+            pageMd += '\n\n_(ข้อความหน้านี้ได้จาก OCR อาจมีจุดผิดพลาด ควรตรวจทาน)_';
+          }
         } else {
           pageMd += '_(ไม่มีข้อความในหน้านี้ — อาจเป็นหน้าสแกนหรือรูปล้วน)_';
         }
@@ -558,10 +579,13 @@ function initPanel(panelEl) {
       let doneMsg = 'แปลงเสร็จแล้ว — กดดาวน์โหลดได้เลย';
       let doneMeta = `${pdf.numPages} หน้า · ${totalChars.toLocaleString()} ตัวอักษร · ${images.length} รูป`;
       if (ocrPageCount > 0) doneMeta += ` · OCR ${ocrPageCount} หน้า`;
+      if (garbledPageCount > 0) doneMeta += ` · ฟอนต์เพี้ยนที่แก้ด้วย OCR ${garbledPageCount} หน้า`;
       if (totalChars === 0) {
         doneMsg = forceOcr
           ? 'แปลงเสร็จ แต่ OCR ก็ยังอ่านข้อความไม่ได้ — ลองสแกนภาพให้คมชัดขึ้น'
           : 'แปลงเสร็จ แต่ไม่พบข้อความเลย — ไฟล์นี้น่าจะเป็น PDF สแกน ลองใช้แท็บ "PDF สแกน" แทน';
+      } else if (garbledPageCount > 0 && ocrPageCount === 0) {
+        doneMsg = 'แปลงเสร็จ แต่พบว่าฟอนต์ในไฟล์นี้เพี้ยน และ OCR ก็ยังอ่านไม่ออก — ลองแท็บ "PDF สแกน" หรือตรวจทานเนื้อหาด้วยตัวเอง';
       }
       setStatus('done', doneMsg, doneMeta);
       downloadBtn.disabled = false;
@@ -645,6 +669,25 @@ function initPanel(panelEl) {
 document.querySelectorAll('.panel').forEach(initPanel);
 
 // ---------- ฟังก์ชันร่วม (ไม่ผูกกับพาแนลไหนโดยเฉพาะ) ----------
+
+// ตรวจจับข้อความที่ "เพี้ยน" (mojibake) จากฟอนต์ในไฟล์ PDF ที่ไม่มีตาราง ToUnicode
+// ที่ถูกต้อง — พบบ่อยในไฟล์แปลงจาก PowerPoint/Canva ภาษาไทย ทำให้ดึงออกมาได้แต่
+// รหัสภายในฟอนต์ (มักตกอยู่ในย่าน Latin Extended-A/B, IPA, Spacing Modifier) แทนตัวอักษรจริง
+function isGarbledText(text) {
+  const chars = [...text.replace(/\s/g, '')];
+  if (chars.length < 8) return false; // สั้นเกินไป ตัดสินไม่แม่น ปล่อยผ่าน
+  let bad = 0;
+  for (const ch of chars) {
+    const cp = ch.codePointAt(0);
+    const ok =
+      (cp >= 0x20 && cp <= 0x7E) ||     // ASCII พิมพ์ได้ปกติ
+      (cp >= 0x0E00 && cp <= 0x0E7F) || // ไทย
+      (cp >= 0x2018 && cp <= 0x201F) || // เครื่องหมายคำพูดโค้ง
+      cp === 0x2013 || cp === 0x2014;   // en/em dash
+    if (!ok) bad++;
+  }
+  return bad / chars.length > 0.12; // เกิน ~12% ของตัวอักษรผิดปกติ ถือว่าเพี้ยน
+}
 
 // เรนเดอร์หน้า PDF เป็น canvas (ใช้เป็น input ให้ OCR)
 async function renderPageToCanvas(page, scale = 2.0) {
